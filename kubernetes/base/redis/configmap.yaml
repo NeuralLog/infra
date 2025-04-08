@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  labels:
+    app: redis
+data:
+  redis.conf: |
+    # Redis configuration for NeuralLog
+    port 6379
+    bind 0.0.0.0
+    protected-mode yes
+    daemonize no
+    
+    # Memory management
+    maxmemory 256mb
+    maxmemory-policy allkeys-lru
+    
+    # Persistence
+    appendonly yes
+    appendfsync everysec
+    
+    # Logging
+    loglevel notice
+    logfile ""
