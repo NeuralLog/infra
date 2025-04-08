@@ -18,24 +18,50 @@ infra/
 ├── redis/                # Redis configuration
 │   ├── conf/             # Redis config files
 │   └── scripts/          # Redis scripts
-└── scripts/              # Utility scripts
+├── scripts/              # Utility scripts
+│   ├── *.ps1             # PowerShell scripts for Windows
+│   └── *.sh              # Bash scripts for Linux/macOS
+└── README.md             # Repository documentation
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) (for local Kubernetes testing)
+- [Git](https://git-scm.com/downloads)
+- [Node.js](https://nodejs.org/) (for development)
+
+### Initializing the Development Environment
+
+To initialize the development environment and check prerequisites:
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Initialize-DevEnvironment.ps1
+
+# Linux/macOS (Bash)
+./scripts/initialize-dev-environment.sh
+```
+
+This script will:
+- Check for required prerequisites
+- Verify Docker is running
+- Check for the NeuralLog/server repository
+- Pull required Docker images
 
 ### Development Environment
 
 To start the development environment:
 
-```bash
-cd scripts
-./start-dev-env.sh
+```powershell
+# Windows (PowerShell)
+.\scripts\Start-DevEnvironment.ps1
+
+# Linux/macOS (Bash)
+./scripts/start-dev-env.sh
 ```
 
 This will start:
@@ -45,18 +71,24 @@ This will start:
 
 To stop the development environment:
 
-```bash
-cd scripts
-./stop-dev-env.sh
+```powershell
+# Windows (PowerShell)
+.\scripts\Stop-DevEnvironment.ps1
+
+# Linux/macOS (Bash)
+./scripts/stop-dev-env.sh
 ```
 
 ### Building Docker Images
 
 To build and optionally push the server Docker image:
 
-```bash
-cd scripts
-./build-server-image.sh [tag]
+```powershell
+# Windows (PowerShell)
+.\scripts\Build-ServerImage.ps1 -Tag "latest" -Push
+
+# Linux/macOS (Bash)
+./scripts/build-server-image.sh latest true
 ```
 
 If no tag is provided, "latest" will be used.
@@ -68,9 +100,12 @@ This repository includes configurations for a test Kubernetes environment using 
 ### Setting Up the Test Environment
 
 1. Create a kind cluster and deploy NeuralLog:
-   ```bash
-   cd scripts
-   ./setup-test-cluster.sh
+   ```powershell
+   # Windows (PowerShell)
+   .\scripts\Setup-TestCluster.ps1
+
+   # Linux/macOS (Bash)
+   ./scripts/setup-test-cluster.sh
    ```
 
 2. Verify the deployment:
@@ -84,9 +119,12 @@ This repository includes configurations for a test Kubernetes environment using 
    ```
 
 4. Clean up the test environment:
-   ```bash
-   cd scripts
-   ./cleanup-test-cluster.sh
+   ```powershell
+   # Windows (PowerShell)
+   .\scripts\Cleanup-TestCluster.ps1
+
+   # Linux/macOS (Bash)
+   ./scripts/cleanup-test-cluster.sh
    ```
 
 ## Kubernetes Configuration
