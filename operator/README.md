@@ -1,5 +1,10 @@
 # NeuralLog Tenant Operator
 
+[![Build Status](https://github.com/neurallog/infra/actions/workflows/operator-build.yml/badge.svg)](https://github.com/neurallog/infra/actions/workflows/operator-build.yml)
+[![Docker Image](https://github.com/neurallog/infra/actions/workflows/operator-docker.yml/badge.svg)](https://github.com/neurallog/infra/actions/workflows/operator-docker.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/neurallog/infra/operator)](https://goreportcard.com/report/github.com/neurallog/infra/operator)
+[![License](https://img.shields.io/github/license/neurallog/infra)](https://github.com/neurallog/infra/blob/main/LICENSE)
+
 The NeuralLog Tenant Operator is a Kubernetes operator that manages multi-tenant deployments of NeuralLog. It provides a simple API for creating and managing tenants, each with their own isolated resources.
 
 ## Overview
@@ -10,6 +15,7 @@ The operator introduces a new custom resource definition (CRD) called `Tenant`. 
 - Server deployment
 - Redis instance
 - Network policies
+- Auth service integration
 
 ## Architecture
 
@@ -38,12 +44,12 @@ metadata:
 spec:
   displayName: "Sample Tenant"
   description: "A sample tenant for demonstration purposes"
-  
+
   # Server configuration
   server:
     replicas: 2
     image: "neurallog/server:latest"
-    
+
   # Redis configuration
   redis:
     storage: "5Gi"

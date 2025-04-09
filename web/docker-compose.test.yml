@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=test
+      - TEST_MODE=true
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    volumes:
+      - ./.next/standalone:/app
+      - ./.next/static:/app/.next/static
+    command: node server.js
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.40.0-jammy
+    depends_on:
+      - web
+    environment:
+      - BASE_URL=http://web:3000
+      - CI=true
+    volumes:
+      - ./:/app
+      - ./playwright-report:/app/playwright-report
+    working_dir: /app
+    command: npx playwright test
