@@ -89,8 +89,14 @@ const (
 	// ComponentPending means the component is being created
 	ComponentPending ComponentPhase = "Pending"
 
+	// ComponentProvisioning means the component is being provisioned
+	ComponentProvisioning ComponentPhase = "Provisioning"
+
 	// ComponentRunning means the component is running
 	ComponentRunning ComponentPhase = "Running"
+
+	// ComponentDegraded means the component is running but not all replicas are ready
+	ComponentDegraded ComponentPhase = "Degraded"
 
 	// ComponentFailed means the component creation failed
 	ComponentFailed ComponentPhase = "Failed"

@@ -22,12 +22,15 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	appsv1 "k8s.io/api/apps/v1"
 	neurallogv1 "github.com/neurallog/operator/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -269,12 +272,58 @@ func (r *TenantReconciler) reconcileRedis(ctx context.Context, tenant *neurallog
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Redis resources", "tenant", tenant.Name)
 
-	// TODO: Implement Redis reconciliation
-	// This would include:
-	// - Creating/updating Redis ConfigMap
-	// - Creating/updating Redis StatefulSet
-	// - Creating/updating Redis Service
-	// - Updating Redis status in tenant.Status.RedisStatus
+	if tenant.Status.Namespace == "" {
+		logger.Info("Namespace not yet created, skipping Redis reconciliation")
+		return nil
+	}
+
+	// Create or update Redis ConfigMap
+	configMap, err := r.reconcileRedisConfigMap(ctx, tenant)
+	if err != nil {
+		logger.Error(err, "Failed to reconcile Redis ConfigMap")
+		return err
+	}
+
+	// Create or update Redis Service
+	service, err := r.reconcileRedisService(ctx, tenant)
+	if err != nil {
+		logger.Error(err, "Failed to reconcile Redis Service")
+		return err
+	}
+
+	// Create or update Redis StatefulSet
+	statefulSet, err := r.reconcileRedisStatefulSet(ctx, tenant, configMap)
+	if err != nil {
+		logger.Error(err, "Failed to reconcile Redis StatefulSet")
+		return err
+	}
+
+	// Update Redis status in tenant.Status.RedisStatus
+	if tenant.Status.RedisStatus == nil {
+		tenant.Status.RedisStatus = &neurallogv1.ComponentStatus{}
+	}
+
+	// Update status based on StatefulSet
+	tenant.Status.RedisStatus.TotalReplicas = statefulSet.Status.Replicas
+	tenant.Status.RedisStatus.ReadyReplicas = statefulSet.Status.ReadyReplicas
+
+	// Determine phase based on replicas
+	if statefulSet.Status.ReadyReplicas == 0 {
+		tenant.Status.RedisStatus.Phase = neurallogv1.ComponentProvisioning
+		tenant.Status.RedisStatus.Message = "Redis is being provisioned"
+	} else if statefulSet.Status.ReadyReplicas < statefulSet.Status.Replicas {
+		tenant.Status.RedisStatus.Phase = neurallogv1.ComponentDegraded
+		tenant.Status.RedisStatus.Message = fmt.Sprintf("Redis is degraded: %d/%d replicas ready", statefulSet.Status.ReadyReplicas, statefulSet.Status.Replicas)
+	} else {
+		tenant.Status.RedisStatus.Phase = neurallogv1.ComponentRunning
+		tenant.Status.RedisStatus.Message = "Redis is running"
+	}
+
+	// Update tenant status
+	if err := r.Status().Update(ctx, tenant); err != nil {
+		logger.Error(err, "Failed to update tenant status with Redis status")
+		return err
+	}
 
 	return nil
 }
@@ -304,6 +353,436 @@ func (r *TenantReconciler) reconcileNetworkPolicies(ctx context.Context, tenant 
 	// - Creating/updating Network Policies based on tenant.Spec.NetworkPolicy
 
 	return nil
+}
+
+// reconcileRedisConfigMap creates or updates the Redis ConfigMap for the tenant
+func (r *TenantReconciler) reconcileRedisConfigMap(ctx context.Context, tenant *neurallogv1.Tenant) (*corev1.ConfigMap, error) {
+	logger := log.FromContext(ctx)
+
+	// Define ConfigMap name
+	configMapName := fmt.Sprintf("%s-redis-config", tenant.Name)
+
+	// Create Redis configuration
+	redisConfig := `# Redis configuration for NeuralLog tenant
+port 6379
+bind 0.0.0.0
+protected-mode yes
+daemonize no
+
+# Memory management
+`
+
+	// Add memory limit if specified
+	maxMemory := "256mb"
+	if tenant.Spec.Redis != nil && tenant.Spec.Redis.Resources != nil && tenant.Spec.Redis.Resources.Memory != nil && tenant.Spec.Redis.Resources.Memory.Limit != "" {
+		maxMemory = tenant.Spec.Redis.Resources.Memory.Limit
+	}
+	redisConfig += fmt.Sprintf("maxmemory %s\n", maxMemory)
+	redisConfig += "maxmemory-policy allkeys-lru\n\n"
+
+	// Add persistence configuration
+	redisConfig += `# Persistence
+appendonly yes
+appendfsync everysec
+
+# Logging
+loglevel notice
+logfile ""
+`
+
+	// Add custom configuration if specified
+	if tenant.Spec.Redis != nil && tenant.Spec.Redis.Config != nil {
+		for key, value := range tenant.Spec.Redis.Config {
+			redisConfig += fmt.Sprintf("%s %s\n", key, value)
+		}
+	}
+
+	// Define ConfigMap
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      configMapName,
+			Namespace: tenant.Status.Namespace,
+			Labels: map[string]string{
+				"app":                  "redis",
+				"neurallog.io/tenant": tenant.Name,
+				"neurallog.io/component": "redis",
+				"neurallog.io/managed-by": "tenant-operator",
+			},
+		},
+		Data: map[string]string{
+			"redis.conf": redisConfig,
+		},
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(tenant, configMap, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set owner reference on Redis ConfigMap")
+		return nil, err
+	}
+
+	// Create or update ConfigMap
+	existingConfigMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, client.ObjectKey{Name: configMapName, Namespace: tenant.Status.Namespace}, existingConfigMap)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create ConfigMap
+			if err := r.Create(ctx, configMap); err != nil {
+				logger.Error(err, "Failed to create Redis ConfigMap")
+				return nil, err
+			}
+			logger.Info("Created Redis ConfigMap", "configMap", configMapName)
+			return configMap, nil
+		}
+		logger.Error(err, "Failed to get Redis ConfigMap")
+		return nil, err
+	}
+
+	// Update ConfigMap if needed
+	if existingConfigMap.Data["redis.conf"] != configMap.Data["redis.conf"] {
+		existingConfigMap.Data = configMap.Data
+		if err := r.Update(ctx, existingConfigMap); err != nil {
+			logger.Error(err, "Failed to update Redis ConfigMap")
+			return nil, err
+		}
+		logger.Info("Updated Redis ConfigMap", "configMap", configMapName)
+	}
+
+	return existingConfigMap, nil
+}
+
+// reconcileRedisService creates or updates the Redis Service for the tenant
+func (r *TenantReconciler) reconcileRedisService(ctx context.Context, tenant *neurallogv1.Tenant) (*corev1.Service, error) {
+	logger := log.FromContext(ctx)
+
+	// Define Service name
+	serviceName := fmt.Sprintf("%s-redis", tenant.Name)
+
+	// Define Service
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: tenant.Status.Namespace,
+			Labels: map[string]string{
+				"app":                  "redis",
+				"neurallog.io/tenant": tenant.Name,
+				"neurallog.io/component": "redis",
+				"neurallog.io/managed-by": "tenant-operator",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app":                  "redis",
+				"neurallog.io/tenant": tenant.Name,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       6379,
+					TargetPort: intstr.FromString("redis"),
+					Name:       "redis",
+				},
+			},
+			ClusterIP: "None", // Headless service for StatefulSet
+		},
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(tenant, service, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set owner reference on Redis Service")
+		return nil, err
+	}
+
+	// Create or update Service
+	existingService := &corev1.Service{}
+	err := r.Get(ctx, client.ObjectKey{Name: serviceName, Namespace: tenant.Status.Namespace}, existingService)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create Service
+			if err := r.Create(ctx, service); err != nil {
+				logger.Error(err, "Failed to create Redis Service")
+				return nil, err
+			}
+			logger.Info("Created Redis Service", "service", serviceName)
+			return service, nil
+		}
+		logger.Error(err, "Failed to get Redis Service")
+		return nil, err
+	}
+
+	// No need to update the service as it's a headless service with minimal configuration
+	return existingService, nil
+}
+
+// reconcileRedisStatefulSet creates or updates the Redis StatefulSet for the tenant
+func (r *TenantReconciler) reconcileRedisStatefulSet(ctx context.Context, tenant *neurallogv1.Tenant, configMap *corev1.ConfigMap) (*appsv1.StatefulSet, error) {
+	logger := log.FromContext(ctx)
+
+	// Define StatefulSet name
+	statefulSetName := fmt.Sprintf("%s-redis", tenant.Name)
+
+	// Define labels
+	labels := map[string]string{
+		"app":                  "redis",
+		"neurallog.io/tenant": tenant.Name,
+		"neurallog.io/component": "redis",
+		"neurallog.io/managed-by": "tenant-operator",
+	}
+
+	// Set replicas
+	replicas := int32(1)
+	if tenant.Spec.Redis != nil && tenant.Spec.Redis.Replicas > 0 {
+		replicas = tenant.Spec.Redis.Replicas
+	}
+
+	// Set image
+	image := "redis:7-alpine"
+	if tenant.Spec.Redis != nil && tenant.Spec.Redis.Image != "" {
+		image = tenant.Spec.Redis.Image
+	}
+
+	// Set resource requirements
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("300m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+
+	if tenant.Spec.Redis != nil && tenant.Spec.Redis.Resources != nil {
+		if tenant.Spec.Redis.Resources.CPU != nil {
+			if tenant.Spec.Redis.Resources.CPU.Request != "" {
+				resources.Requests[corev1.ResourceCPU] = resource.MustParse(tenant.Spec.Redis.Resources.CPU.Request)
+			}
+			if tenant.Spec.Redis.Resources.CPU.Limit != "" {
+				resources.Limits[corev1.ResourceCPU] = resource.MustParse(tenant.Spec.Redis.Resources.CPU.Limit)
+			}
+		}
+		if tenant.Spec.Redis.Resources.Memory != nil {
+			if tenant.Spec.Redis.Resources.Memory.Request != "" {
+				resources.Requests[corev1.ResourceMemory] = resource.MustParse(tenant.Spec.Redis.Resources.Memory.Request)
+			}
+			if tenant.Spec.Redis.Resources.Memory.Limit != "" {
+				resources.Limits[corev1.ResourceMemory] = resource.MustParse(tenant.Spec.Redis.Resources.Memory.Limit)
+			}
+		}
+	}
+
+	// Set storage
+	storage := "1Gi"
+	if tenant.Spec.Redis != nil && tenant.Spec.Redis.Storage != "" {
+		storage = tenant.Spec.Redis.Storage
+	}
+
+	// Define StatefulSet
+	statefulSet := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      statefulSetName,
+			Namespace: tenant.Status.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			ServiceName: fmt.Sprintf("%s-redis", tenant.Name),
+			Replicas:    &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app":                  "redis",
+					"neurallog.io/tenant": tenant.Name,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "redis",
+							Image: image,
+							Command: []string{
+								"redis-server",
+								"/etc/redis/redis.conf",
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 6379,
+									Name:          "redis",
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "redis-data",
+									MountPath: "/data",
+								},
+								{
+									Name:      "redis-config",
+									MountPath: "/etc/redis",
+								},
+							},
+							Resources: resources,
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromString("redis"),
+									},
+								},
+								InitialDelaySeconds: 15,
+								PeriodSeconds:       20,
+							},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{
+											"redis-cli",
+											"ping",
+										},
+									},
+								},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       10,
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "redis-config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: configMap.Name,
+									},
+									Items: []corev1.KeyToPath{
+										{
+											Key:  "redis.conf",
+											Path: "redis.conf",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "redis-data",
+					},
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteOnce,
+						},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: resource.MustParse(storage),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(tenant, statefulSet, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set owner reference on Redis StatefulSet")
+		return nil, err
+	}
+
+	// Create or update StatefulSet
+	existingStatefulSet := &appsv1.StatefulSet{}
+	err := r.Get(ctx, client.ObjectKey{Name: statefulSetName, Namespace: tenant.Status.Namespace}, existingStatefulSet)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create StatefulSet
+			if err := r.Create(ctx, statefulSet); err != nil {
+				logger.Error(err, "Failed to create Redis StatefulSet")
+				return nil, err
+			}
+			logger.Info("Created Redis StatefulSet", "statefulSet", statefulSetName)
+			return statefulSet, nil
+		}
+		logger.Error(err, "Failed to get Redis StatefulSet")
+		return nil, err
+	}
+
+	// Update StatefulSet if needed
+	updated := false
+
+	// Check if replicas need to be updated
+	if existingStatefulSet.Spec.Replicas == nil || *existingStatefulSet.Spec.Replicas != replicas {
+		existingStatefulSet.Spec.Replicas = &replicas
+		updated = true
+	}
+
+	// Check if image needs to be updated
+	if existingStatefulSet.Spec.Template.Spec.Containers[0].Image != image {
+		existingStatefulSet.Spec.Template.Spec.Containers[0].Image = image
+		updated = true
+	}
+
+	// Check if resources need to be updated
+	if !resourcesEqual(existingStatefulSet.Spec.Template.Spec.Containers[0].Resources, resources) {
+		existingStatefulSet.Spec.Template.Spec.Containers[0].Resources = resources
+		updated = true
+	}
+
+	// Check if ConfigMap reference needs to be updated
+	for i, volume := range existingStatefulSet.Spec.Template.Spec.Volumes {
+		if volume.Name == "redis-config" && volume.ConfigMap != nil && volume.ConfigMap.Name != configMap.Name {
+			existingStatefulSet.Spec.Template.Spec.Volumes[i].ConfigMap.Name = configMap.Name
+			updated = true
+		}
+	}
+
+	// Update StatefulSet if needed
+	if updated {
+		if err := r.Update(ctx, existingStatefulSet); err != nil {
+			logger.Error(err, "Failed to update Redis StatefulSet")
+			return nil, err
+		}
+		logger.Info("Updated Redis StatefulSet", "statefulSet", statefulSetName)
+	}
+
+	return existingStatefulSet, nil
+}
+
+// resourcesEqual compares two ResourceRequirements for equality
+func resourcesEqual(a, b corev1.ResourceRequirements) bool {
+	// Compare CPU requests
+	if !resourceValueEqual(a.Requests.Cpu(), b.Requests.Cpu()) {
+		return false
+	}
+
+	// Compare Memory requests
+	if !resourceValueEqual(a.Requests.Memory(), b.Requests.Memory()) {
+		return false
+	}
+
+	// Compare CPU limits
+	if !resourceValueEqual(a.Limits.Cpu(), b.Limits.Cpu()) {
+		return false
+	}
+
+	// Compare Memory limits
+	if !resourceValueEqual(a.Limits.Memory(), b.Limits.Memory()) {
+		return false
+	}
+
+	return true
+}
+
+// resourceValueEqual compares two resource.Quantity pointers for equality
+func resourceValueEqual(a, b *resource.Quantity) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Equal(*b)
 }
 
 // SetupWithManager sets up the controller with the Manager.
