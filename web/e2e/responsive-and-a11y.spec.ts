@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from './test-setup';
 import { devices } from '@playwright/test';
 
 test.describe('Responsive Design and Accessibility', () => {

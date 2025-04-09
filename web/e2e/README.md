@@ -1,13 +1,13 @@
 # NeuralLog Admin E2E Tests
 
-This directory contains end-to-end tests for the NeuralLog Admin web interface using Playwright.
+This directory contains end-to-end tests for the NeuralLog Admin web interface using Playwright. These tests interact with a real Kubernetes API to test the full functionality of the application.
 
 ## Test Structure
 
 The tests are organized into the following files:
 
-- `fixtures.ts` - Test fixtures and utilities
-- `mock-api-handler.ts` - Mock API handler for intercepting API calls
+- `test-setup.ts` - Test fixtures and utilities for setting up and tearing down test data
+- `setup-kind.sh` - Script to set up a local Kubernetes environment using Kind
 - `homepage.spec.ts` - Tests for the homepage and tenant listing
 - `tenant-creation.spec.ts` - Tests for tenant creation
 - `tenant-editing.spec.ts` - Tests for tenant editing
@@ -15,6 +15,24 @@ The tests are organized into the following files:
 - `responsive-and-a11y.spec.ts` - Tests for responsive design and accessibility
 
 ## Running Tests
+
+### Prerequisites
+
+Before running the tests, you need to set up a local Kubernetes environment:
+
+1. Install Kind (Kubernetes in Docker)
+2. Install kubectl
+3. Run the setup script:
+
+```bash
+# Make the script executable
+chmod +x setup-kind.sh
+
+# Run the setup script
+./setup-kind.sh
+```
+
+### Running the Tests
 
 You can run the tests using the following npm scripts:
 
@@ -31,6 +49,12 @@ npm run test:headed
 # Run tests in debug mode
 npm run test:debug
 ```
+
+### Environment Variables
+
+You can configure the tests using the following environment variables:
+
+- `API_URL`: The URL of the Kubernetes API (default: http://localhost:30000)
 
 ## Test Coverage
 
@@ -64,38 +88,36 @@ The tests cover the following aspects of the application:
 - Keyboard navigation and focus management
 - Dialog accessibility
 
-## Mock API
+## Real API Integration
 
-The tests use a mock API handler to intercept API calls and return mock responses. This allows the tests to run without a real backend and to simulate various scenarios, including error conditions.
+These tests interact with a real Kubernetes API to provide true end-to-end testing. The `test-setup.ts` file contains utilities for setting up and tearing down test data in the Kubernetes cluster.
 
-The mock API handler is implemented in `mock-api-handler.ts` and provides the following functionality:
+The tests perform the following operations on the real API:
 
-- Intercepting API calls to `/api/tenants` and `/api/tenants/:name`
-- Returning mock tenant data
-- Simulating tenant creation, update, and deletion
-- Simulating API errors
+- Creating test tenants before tests run
+- Reading tenant data during tests
+- Updating tenant configurations
+- Deleting test tenants after tests complete
+
+This approach ensures that the tests verify the full functionality of the application, including its integration with the Kubernetes API.
 
 ## Adding New Tests
 
 To add new tests:
 
 1. Create a new test file in the `e2e` directory
-2. Import the test fixtures from `fixtures.ts`
-3. Use the mock API handler to set up test data
+2. Import the test fixtures from `test-setup.ts`
+3. Use the testSetup fixture to ensure test data is available
 4. Write your tests using Playwright's API
 
 Example:
 
 ```typescript
-import { test, expect } from './fixtures';
+import { test, expect } from './test-setup';
 
 test.describe('My New Feature', () => {
-  test('should do something', async ({ page, mockApi }) => {
-    // Set up test data
-    await mockApi.addTenant({
-      metadata: { name: 'test-tenant' },
-      spec: { displayName: 'Test Tenant' }
-    });
+  test('should do something', async ({ page, testSetup }) => {
+    // The testSetup fixture ensures test tenants are created
 
     // Navigate to the page
     await page.goto('/my-feature');

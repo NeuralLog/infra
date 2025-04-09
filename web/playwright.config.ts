@@ -28,10 +28,15 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run start',
+    command: 'npm run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: {
+      PORT: '3000',
+      HOSTNAME: '0.0.0.0',
+      API_URL: process.env.API_URL || 'http://localhost:30000',
+    },
   },
 });

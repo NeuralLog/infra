@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect } from './test-setup';
 
 test.describe('Tenant Creation', () => {
   test('should create a new tenant with default values', async ({ page }) => {
