@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -333,12 +334,51 @@ func (r *TenantReconciler) reconcileServer(ctx context.Context, tenant *neurallo
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Server resources", "tenant", tenant.Name)
 
-	// TODO: Implement Server reconciliation
-	// This would include:
-	// - Creating/updating Server ConfigMap
-	// - Creating/updating Server Deployment
-	// - Creating/updating Server Service
-	// - Updating Server status in tenant.Status.ServerStatus
+	if tenant.Status.Namespace == "" {
+		logger.Info("Namespace not yet created, skipping Server reconciliation")
+		return nil
+	}
+
+	// Create or update Server Service
+	service, err := r.reconcileServerService(ctx, tenant)
+	if err != nil {
+		logger.Error(err, "Failed to reconcile Server Service")
+		return err
+	}
+
+	// Create or update Server Deployment
+	deployment, err := r.reconcileServerDeployment(ctx, tenant)
+	if err != nil {
+		logger.Error(err, "Failed to reconcile Server Deployment")
+		return err
+	}
+
+	// Update Server status in tenant.Status.ServerStatus
+	if tenant.Status.ServerStatus == nil {
+		tenant.Status.ServerStatus = &neurallogv1.ComponentStatus{}
+	}
+
+	// Update status based on Deployment
+	tenant.Status.ServerStatus.TotalReplicas = deployment.Status.Replicas
+	tenant.Status.ServerStatus.ReadyReplicas = deployment.Status.ReadyReplicas
+
+	// Determine phase based on replicas
+	if deployment.Status.ReadyReplicas == 0 {
+		tenant.Status.ServerStatus.Phase = neurallogv1.ComponentProvisioning
+		tenant.Status.ServerStatus.Message = "Server is being provisioned"
+	} else if deployment.Status.ReadyReplicas < deployment.Status.Replicas {
+		tenant.Status.ServerStatus.Phase = neurallogv1.ComponentDegraded
+		tenant.Status.ServerStatus.Message = fmt.Sprintf("Server is degraded: %d/%d replicas ready", deployment.Status.ReadyReplicas, deployment.Status.Replicas)
+	} else {
+		tenant.Status.ServerStatus.Phase = neurallogv1.ComponentRunning
+		tenant.Status.ServerStatus.Message = "Server is running"
+	}
+
+	// Update tenant status
+	if err := r.Status().Update(ctx, tenant); err != nil {
+		logger.Error(err, "Failed to update tenant status with Server status")
+		return err
+	}
 
 	return nil
 }
@@ -783,6 +823,444 @@ func resourceValueEqual(a, b *resource.Quantity) bool {
 		return false
 	}
 	return a.Equal(*b)
+}
+
+// reconcileServerService creates or updates the Server Service for the tenant
+func (r *TenantReconciler) reconcileServerService(ctx context.Context, tenant *neurallogv1.Tenant) (*corev1.Service, error) {
+	logger := log.FromContext(ctx)
+
+	// Define Service name
+	serviceName := fmt.Sprintf("%s-server", tenant.Name)
+
+	// Define Service
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: tenant.Status.Namespace,
+			Labels: map[string]string{
+				"app":                  "neurallog-server",
+				"neurallog.io/tenant": tenant.Name,
+				"neurallog.io/component": "server",
+				"neurallog.io/managed-by": "tenant-operator",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app":                  "neurallog-server",
+				"neurallog.io/tenant": tenant.Name,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       3030,
+					TargetPort: intstr.FromString("http"),
+					Name:       "http",
+				},
+			},
+			Type: corev1.ServiceTypeClusterIP,
+		},
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(tenant, service, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set owner reference on Server Service")
+		return nil, err
+	}
+
+	// Create or update Service
+	existingService := &corev1.Service{}
+	err := r.Get(ctx, client.ObjectKey{Name: serviceName, Namespace: tenant.Status.Namespace}, existingService)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create Service
+			if err := r.Create(ctx, service); err != nil {
+				logger.Error(err, "Failed to create Server Service")
+				return nil, err
+			}
+			logger.Info("Created Server Service", "service", serviceName)
+			return service, nil
+		}
+		logger.Error(err, "Failed to get Server Service")
+		return nil, err
+	}
+
+	// Update Service if needed
+	updated := false
+
+	// Check if selector needs to be updated
+	if !reflect.DeepEqual(existingService.Spec.Selector, service.Spec.Selector) {
+		existingService.Spec.Selector = service.Spec.Selector
+		updated = true
+	}
+
+	// Check if ports need to be updated
+	if !reflect.DeepEqual(existingService.Spec.Ports, service.Spec.Ports) {
+		existingService.Spec.Ports = service.Spec.Ports
+		updated = true
+	}
+
+	// Update Service if needed
+	if updated {
+		if err := r.Update(ctx, existingService); err != nil {
+			logger.Error(err, "Failed to update Server Service")
+			return nil, err
+		}
+		logger.Info("Updated Server Service", "service", serviceName)
+	}
+
+	return existingService, nil
+}
+
+// reconcileServerDeployment creates or updates the Server Deployment for the tenant
+func (r *TenantReconciler) reconcileServerDeployment(ctx context.Context, tenant *neurallogv1.Tenant) (*appsv1.Deployment, error) {
+	logger := log.FromContext(ctx)
+
+	// Define Deployment name
+	deploymentName := fmt.Sprintf("%s-server", tenant.Name)
+
+	// Define labels
+	labels := map[string]string{
+		"app":                  "neurallog-server",
+		"neurallog.io/tenant": tenant.Name,
+		"neurallog.io/component": "server",
+		"neurallog.io/managed-by": "tenant-operator",
+	}
+
+	// Set replicas
+	replicas := int32(1)
+	if tenant.Spec.Server != nil && tenant.Spec.Server.Replicas > 0 {
+		replicas = tenant.Spec.Server.Replicas
+	}
+
+	// Set image
+	image := "neurallog/server:latest"
+	if tenant.Spec.Server != nil && tenant.Spec.Server.Image != "" {
+		image = tenant.Spec.Server.Image
+	}
+
+	// Set resource requirements
+	resources := corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("500m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		},
+	}
+
+	if tenant.Spec.Server != nil && tenant.Spec.Server.Resources != nil {
+		if tenant.Spec.Server.Resources.CPU != nil {
+			if tenant.Spec.Server.Resources.CPU.Request != "" {
+				resources.Requests[corev1.ResourceCPU] = resource.MustParse(tenant.Spec.Server.Resources.CPU.Request)
+			}
+			if tenant.Spec.Server.Resources.CPU.Limit != "" {
+				resources.Limits[corev1.ResourceCPU] = resource.MustParse(tenant.Spec.Server.Resources.CPU.Limit)
+			}
+		}
+		if tenant.Spec.Server.Resources.Memory != nil {
+			if tenant.Spec.Server.Resources.Memory.Request != "" {
+				resources.Requests[corev1.ResourceMemory] = resource.MustParse(tenant.Spec.Server.Resources.Memory.Request)
+			}
+			if tenant.Spec.Server.Resources.Memory.Limit != "" {
+				resources.Limits[corev1.ResourceMemory] = resource.MustParse(tenant.Spec.Server.Resources.Memory.Limit)
+			}
+		}
+	}
+
+	// Define environment variables
+	env := []corev1.EnvVar{
+		{
+			Name:  "NODE_ENV",
+			Value: "production",
+		},
+		{
+			Name:  "PORT",
+			Value: "3030",
+		},
+		{
+			Name:  "REDIS_URL",
+			Value: fmt.Sprintf("redis://%s-redis:6379", tenant.Name),
+		},
+		{
+			Name:  "LOG_LEVEL",
+			Value: "info",
+		},
+		{
+			Name:  "TENANT_ID",
+			Value: tenant.Name,
+		},
+		{
+			Name:  "AUTH_URL",
+			Value: "http://auth:3000",
+		},
+	}
+
+	// Add custom environment variables if specified
+	if tenant.Spec.Server != nil && tenant.Spec.Server.Env != nil {
+		for _, customEnv := range tenant.Spec.Server.Env {
+			// Create a new EnvVar
+			newEnv := corev1.EnvVar{
+				Name: customEnv.Name,
+			}
+
+			// Set value or valueFrom
+			if customEnv.Value != "" {
+				newEnv.Value = customEnv.Value
+			} else if customEnv.ValueFrom != nil {
+				newEnv.ValueFrom = &corev1.EnvVarSource{}
+
+				// Set ConfigMapKeyRef if specified
+				if customEnv.ValueFrom.ConfigMapKeyRef != nil {
+					newEnv.ValueFrom.ConfigMapKeyRef = &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: customEnv.ValueFrom.ConfigMapKeyRef.Name,
+						},
+						Key:      customEnv.ValueFrom.ConfigMapKeyRef.Key,
+						Optional: customEnv.ValueFrom.ConfigMapKeyRef.Optional,
+					}
+				}
+
+				// Set SecretKeyRef if specified
+				if customEnv.ValueFrom.SecretKeyRef != nil {
+					newEnv.ValueFrom.SecretKeyRef = &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: customEnv.ValueFrom.SecretKeyRef.Name,
+						},
+						Key:      customEnv.ValueFrom.SecretKeyRef.Key,
+						Optional: customEnv.ValueFrom.SecretKeyRef.Optional,
+					}
+				}
+			}
+
+			// Add the environment variable
+			env = append(env, newEnv)
+		}
+	}
+
+	// Define Deployment
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      deploymentName,
+			Namespace: tenant.Status.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app":                  "neurallog-server",
+					"neurallog.io/tenant": tenant.Name,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:            "server",
+							Image:           image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 3030,
+									Name:          "http",
+								},
+							},
+							Env:       env,
+							Resources: resources,
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path: "/health",
+										Port: intstr.FromString("http"),
+									},
+								},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       10,
+								TimeoutSeconds:      5,
+								SuccessThreshold:    1,
+								FailureThreshold:    3,
+							},
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path: "/health",
+										Port: intstr.FromString("http"),
+									},
+								},
+								InitialDelaySeconds: 15,
+								PeriodSeconds:       20,
+								TimeoutSeconds:      5,
+								SuccessThreshold:    1,
+								FailureThreshold:    3,
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "tmp-volume",
+									MountPath: "/tmp",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "tmp-volume",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(tenant, deployment, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set owner reference on Server Deployment")
+		return nil, err
+	}
+
+	// Create or update Deployment
+	existingDeployment := &appsv1.Deployment{}
+	err := r.Get(ctx, client.ObjectKey{Name: deploymentName, Namespace: tenant.Status.Namespace}, existingDeployment)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create Deployment
+			if err := r.Create(ctx, deployment); err != nil {
+				logger.Error(err, "Failed to create Server Deployment")
+				return nil, err
+			}
+			logger.Info("Created Server Deployment", "deployment", deploymentName)
+			return deployment, nil
+		}
+		logger.Error(err, "Failed to get Server Deployment")
+		return nil, err
+	}
+
+	// Update Deployment if needed
+	updated := false
+
+	// Check if replicas need to be updated
+	if existingDeployment.Spec.Replicas == nil || *existingDeployment.Spec.Replicas != replicas {
+		existingDeployment.Spec.Replicas = &replicas
+		updated = true
+	}
+
+	// Check if image needs to be updated
+	if existingDeployment.Spec.Template.Spec.Containers[0].Image != image {
+		existingDeployment.Spec.Template.Spec.Containers[0].Image = image
+		updated = true
+	}
+
+	// Check if resources need to be updated
+	if !resourcesEqual(existingDeployment.Spec.Template.Spec.Containers[0].Resources, resources) {
+		existingDeployment.Spec.Template.Spec.Containers[0].Resources = resources
+		updated = true
+	}
+
+	// Check if environment variables need to be updated
+	if !envVarsEqual(existingDeployment.Spec.Template.Spec.Containers[0].Env, env) {
+		existingDeployment.Spec.Template.Spec.Containers[0].Env = env
+		updated = true
+	}
+
+	// Update Deployment if needed
+	if updated {
+		if err := r.Update(ctx, existingDeployment); err != nil {
+			logger.Error(err, "Failed to update Server Deployment")
+			return nil, err
+		}
+		logger.Info("Updated Server Deployment", "deployment", deploymentName)
+	}
+
+	return existingDeployment, nil
+}
+
+// envVarsEqual compares two slices of EnvVar for equality
+func envVarsEqual(a, b []corev1.EnvVar) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create maps for easier comparison
+	aMap := make(map[string]corev1.EnvVar)
+	for _, env := range a {
+		aMap[env.Name] = env
+	}
+
+	bMap := make(map[string]corev1.EnvVar)
+	for _, env := range b {
+		bMap[env.Name] = env
+	}
+
+	// Check if all keys in a are in b with the same values
+	for name, envA := range aMap {
+		envB, ok := bMap[name]
+		if !ok {
+			return false
+		}
+
+		// Compare Value
+		if envA.Value != envB.Value {
+			return false
+		}
+
+		// Compare ValueFrom
+		if !envVarSourceEqual(envA.ValueFrom, envB.ValueFrom) {
+			return false
+		}
+	}
+
+	// Check if all keys in b are in a
+	for name := range bMap {
+		_, ok := aMap[name]
+		if !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+// envVarSourceEqual compares two EnvVarSource pointers for equality
+func envVarSourceEqual(a, b *corev1.EnvVarSource) bool {
+	// If both are nil, they are equal
+	if a == nil && b == nil {
+		return true
+	}
+
+	// If only one is nil, they are not equal
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Compare ConfigMapKeyRef
+	if a.ConfigMapKeyRef != nil && b.ConfigMapKeyRef != nil {
+		if a.ConfigMapKeyRef.Name != b.ConfigMapKeyRef.Name ||
+			a.ConfigMapKeyRef.Key != b.ConfigMapKeyRef.Key ||
+			(a.ConfigMapKeyRef.Optional != nil && b.ConfigMapKeyRef.Optional != nil && *a.ConfigMapKeyRef.Optional != *b.ConfigMapKeyRef.Optional) {
+			return false
+		}
+	} else if a.ConfigMapKeyRef != nil || b.ConfigMapKeyRef != nil {
+		return false
+	}
+
+	// Compare SecretKeyRef
+	if a.SecretKeyRef != nil && b.SecretKeyRef != nil {
+		if a.SecretKeyRef.Name != b.SecretKeyRef.Name ||
+			a.SecretKeyRef.Key != b.SecretKeyRef.Key ||
+			(a.SecretKeyRef.Optional != nil && b.SecretKeyRef.Optional != nil && *a.SecretKeyRef.Optional != *b.SecretKeyRef.Optional) {
+			return false
+		}
+	} else if a.SecretKeyRef != nil || b.SecretKeyRef != nil {
+		return false
+	}
+
+	return true
 }
 
 // SetupWithManager sets up the controller with the Manager.
