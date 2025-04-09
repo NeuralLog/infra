@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	corev1 "k8s.io/api/core/v1"
 	neurallogv1 "github.com/neurallog/operator/api/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 )
@@ -33,28 +35,37 @@ import (
 // reconcileNetworkPolicies creates or updates network policies for the tenant
 func (r *TenantReconciler) reconcileNetworkPolicies(ctx context.Context, tenant *neurallogv1.Tenant) error {
 	logger := log.FromContext(ctx)
-	
+	logger.Info("Reconciling Network Policies", "tenant", tenant.Name)
+
+	// Skip if the namespace doesn't exist yet
+	if tenant.Status.Namespace == "" {
+		logger.Info("Namespace not yet created, skipping Network Policy reconciliation")
+		return nil
+	}
+
 	// Check if network policies are enabled
 	enabled := true
 	if tenant.Spec.NetworkPolicy.Enabled != nil {
 		enabled = *tenant.Spec.NetworkPolicy.Enabled
 	}
-	
+
 	if !enabled {
 		logger.Info("Network policies are disabled for this tenant", "tenant", tenant.Name)
 		return nil
 	}
-	
+
 	// Create default network policies
 	if err := r.reconcileDefaultNetworkPolicies(ctx, tenant); err != nil {
+		logger.Error(err, "Failed to reconcile default network policies")
 		return err
 	}
-	
+
 	// Create custom network policies
 	if err := r.reconcileCustomNetworkPolicies(ctx, tenant); err != nil {
+		logger.Error(err, "Failed to reconcile custom network policies")
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -62,7 +73,7 @@ func (r *TenantReconciler) reconcileNetworkPolicies(ctx context.Context, tenant 
 func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, tenant *neurallogv1.Tenant) error {
 	logger := log.FromContext(ctx)
 	namespaceName := tenant.Status.Namespace
-	
+
 	// Create default deny all ingress policy
 	denyAllPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -81,13 +92,13 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 			},
 		},
 	}
-	
+
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(tenant, denyAllPolicy, r.Scheme); err != nil {
 		logger.Error(err, "Failed to set owner reference on default deny network policy")
 		return err
 	}
-	
+
 	// Create or update the network policy
 	existingPolicy := &networkingv1.NetworkPolicy{}
 	err := r.Get(ctx, client.ObjectKey{Name: denyAllPolicy.Name, Namespace: denyAllPolicy.Namespace}, existingPolicy)
@@ -112,7 +123,7 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 		}
 		logger.Info("Updated default deny network policy", "policy", existingPolicy.Name)
 	}
-	
+
 	// Create allow internal traffic policy
 	allowInternalPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -140,13 +151,13 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 			},
 		},
 	}
-	
+
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(tenant, allowInternalPolicy, r.Scheme); err != nil {
 		logger.Error(err, "Failed to set owner reference on allow internal traffic network policy")
 		return err
 	}
-	
+
 	// Create or update the network policy
 	existingInternalPolicy := &networkingv1.NetworkPolicy{}
 	err = r.Get(ctx, client.ObjectKey{Name: allowInternalPolicy.Name, Namespace: allowInternalPolicy.Namespace}, existingInternalPolicy)
@@ -171,7 +182,7 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 		}
 		logger.Info("Updated allow internal traffic network policy", "policy", existingInternalPolicy.Name)
 	}
-	
+
 	// Create allow API access policy
 	allowApiPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -210,7 +221,7 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 			},
 		},
 	}
-	
+
 	// Add allowed namespaces if specified
 	if len(tenant.Spec.NetworkPolicy.AllowedNamespaces) > 0 {
 		for _, ns := range tenant.Spec.NetworkPolicy.AllowedNamespaces {
@@ -223,13 +234,13 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 			})
 		}
 	}
-	
+
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(tenant, allowApiPolicy, r.Scheme); err != nil {
 		logger.Error(err, "Failed to set owner reference on allow API access network policy")
 		return err
 	}
-	
+
 	// Create or update the network policy
 	existingApiPolicy := &networkingv1.NetworkPolicy{}
 	err = r.Get(ctx, client.ObjectKey{Name: allowApiPolicy.Name, Namespace: allowApiPolicy.Namespace}, existingApiPolicy)
@@ -254,7 +265,7 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 		}
 		logger.Info("Updated allow API access network policy", "policy", existingApiPolicy.Name)
 	}
-	
+
 	return nil
 }
 
@@ -262,11 +273,11 @@ func (r *TenantReconciler) reconcileDefaultNetworkPolicies(ctx context.Context, 
 func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, tenant *neurallogv1.Tenant) error {
 	logger := log.FromContext(ctx)
 	namespaceName := tenant.Status.Namespace
-	
+
 	// Process custom ingress rules
 	for i, rule := range tenant.Spec.NetworkPolicy.IngressRules {
 		policyName := fmt.Sprintf("custom-ingress-%d", i)
-		
+
 		// Create network policy for the ingress rule
 		ingressPolicy := &networkingv1.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
@@ -286,7 +297,7 @@ func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, t
 				},
 			},
 		}
-		
+
 		// Add from selectors if specified
 		if len(rule.From) > 0 {
 			ingressPolicy.Spec.Ingress[0].From = []networkingv1.NetworkPolicyPeer{
@@ -297,32 +308,32 @@ func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, t
 				},
 			}
 		}
-		
+
 		// Add ports if specified
 		if len(rule.Ports) > 0 {
 			for _, port := range rule.Ports {
 				networkPort := networkingv1.NetworkPolicyPort{}
-				
+
 				if port.Protocol != "" {
 					protocol := corev1.Protocol(port.Protocol)
 					networkPort.Protocol = &protocol
 				}
-				
+
 				if port.Port != 0 {
 					portVal := intstr.FromInt(int(port.Port))
 					networkPort.Port = &portVal
 				}
-				
+
 				ingressPolicy.Spec.Ingress[0].Ports = append(ingressPolicy.Spec.Ingress[0].Ports, networkPort)
 			}
 		}
-		
+
 		// Set owner reference
 		if err := controllerutil.SetControllerReference(tenant, ingressPolicy, r.Scheme); err != nil {
 			logger.Error(err, "Failed to set owner reference on custom ingress network policy")
 			return err
 		}
-		
+
 		// Create or update the network policy
 		existingPolicy := &networkingv1.NetworkPolicy{}
 		err := r.Get(ctx, client.ObjectKey{Name: ingressPolicy.Name, Namespace: ingressPolicy.Namespace}, existingPolicy)
@@ -348,11 +359,11 @@ func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, t
 			logger.Info("Updated custom ingress network policy", "policy", existingPolicy.Name)
 		}
 	}
-	
+
 	// Process custom egress rules
 	for i, rule := range tenant.Spec.NetworkPolicy.EgressRules {
 		policyName := fmt.Sprintf("custom-egress-%d", i)
-		
+
 		// Create network policy for the egress rule
 		egressPolicy := &networkingv1.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
@@ -372,7 +383,7 @@ func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, t
 				},
 			},
 		}
-		
+
 		// Add to selectors if specified
 		if len(rule.To) > 0 {
 			egressPolicy.Spec.Egress[0].To = []networkingv1.NetworkPolicyPeer{
@@ -383,32 +394,32 @@ func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, t
 				},
 			}
 		}
-		
+
 		// Add ports if specified
 		if len(rule.Ports) > 0 {
 			for _, port := range rule.Ports {
 				networkPort := networkingv1.NetworkPolicyPort{}
-				
+
 				if port.Protocol != "" {
 					protocol := corev1.Protocol(port.Protocol)
 					networkPort.Protocol = &protocol
 				}
-				
+
 				if port.Port != 0 {
 					portVal := intstr.FromInt(int(port.Port))
 					networkPort.Port = &portVal
 				}
-				
+
 				egressPolicy.Spec.Egress[0].Ports = append(egressPolicy.Spec.Egress[0].Ports, networkPort)
 			}
 		}
-		
+
 		// Set owner reference
 		if err := controllerutil.SetControllerReference(tenant, egressPolicy, r.Scheme); err != nil {
 			logger.Error(err, "Failed to set owner reference on custom egress network policy")
 			return err
 		}
-		
+
 		// Create or update the network policy
 		existingPolicy := &networkingv1.NetworkPolicy{}
 		err := r.Get(ctx, client.ObjectKey{Name: egressPolicy.Name, Namespace: egressPolicy.Namespace}, existingPolicy)
@@ -434,6 +445,6 @@ func (r *TenantReconciler) reconcileCustomNetworkPolicies(ctx context.Context, t
 			logger.Info("Updated custom egress network policy", "policy", existingPolicy.Name)
 		}
 	}
-	
+
 	return nil
 }
