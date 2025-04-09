@@ -1,0 +1,78 @@
+apiVersion: neurallog.io/v1
+kind: Tenant
+metadata:
+  name: sample-tenant
+spec:
+  displayName: "Sample Tenant"
+  description: "A sample tenant for demonstration purposes"
+  
+  # Resource limits and requests for the tenant
+  resources:
+    cpu:
+      limit: "4"
+      request: "2"
+    memory:
+      limit: "8Gi"
+      request: "4Gi"
+    storage:
+      limit: "20Gi"
+      request: "10Gi"
+  
+  # Server configuration
+  server:
+    replicas: 2
+    image: "neurallog/server:latest"
+    resources:
+      cpu:
+        limit: "1"
+        request: "500m"
+      memory:
+        limit: "1Gi"
+        request: "512Mi"
+    env:
+      - name: LOG_LEVEL
+        value: "debug"
+      - name: MAX_CONNECTIONS
+        value: "100"
+      - name: API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: tenant-secrets
+            key: api-key
+  
+  # Redis configuration
+  redis:
+    replicas: 1
+    image: "redis:7-alpine"
+    resources:
+      cpu:
+        limit: "500m"
+        request: "200m"
+      memory:
+        limit: "1Gi"
+        request: "512Mi"
+    storage: "5Gi"
+    config:
+      maxmemory: "512mb"
+      maxmemory-policy: "allkeys-lru"
+  
+  # Network policy configuration
+  networkPolicy:
+    enabled: true
+    allowedNamespaces:
+      - "default"
+      - "monitoring"
+    ingressRules:
+      - description: "Allow monitoring tools"
+        from:
+          app: "prometheus"
+        ports:
+          - protocol: "TCP"
+            port: 3030
+    egressRules:
+      - description: "Allow external API access"
+        to:
+          app: "external-api"
+        ports:
+          - protocol: "TCP"
+            port: 443
