@@ -1,6 +1,6 @@
 # NeuralLog Infrastructure
 
-This repository contains infrastructure configurations for the NeuralLog system, including Kubernetes manifests, Docker configurations, and Redis setup.
+This repository contains infrastructure configurations for the NeuralLog system, including Kubernetes manifests, Docker configurations, Redis setup, and authentication services.
 
 ## Repository Structure
 
@@ -9,11 +9,14 @@ infra/
 ├── kubernetes/           # Kubernetes configurations
 │   ├── base/             # Base Kubernetes resources
 │   │   ├── server/       # Server resources
-│   │   └── redis/        # Redis resources
+│   │   ├── redis/        # Redis resources
+│   │   ├── auth/         # Auth service resources
+│   │   └── openfga/      # OpenFGA resources
 │   └── overlays/         # Kustomize overlays
 │       └── test/         # Test environment
 ├── docker/               # Docker configurations
 │   ├── server/           # Server Docker files
+│   ├── auth/             # Auth service Docker files
 │   └── dev/              # Development Docker files
 ├── redis/                # Redis configuration
 │   ├── conf/             # Redis config files
@@ -68,6 +71,8 @@ This will start:
 - NeuralLog server on http://localhost:3030
 - Redis on port 6379
 - Redis Commander on http://localhost:8081
+- Auth service on http://localhost:3040
+- OpenFGA on http://localhost:8080
 
 To stop the development environment:
 
@@ -152,6 +157,27 @@ Redis scripts for backup and restore are available in the `redis/scripts` direct
 
 # Restore Redis data
 ./redis/scripts/restore-redis.sh <backup-file>
+```
+
+## Auth Service
+
+The Auth Service provides authentication and authorization capabilities for the NeuralLog platform. It uses OpenFGA (Fine-Grained Authorization) to manage permissions and supports multi-tenancy.
+
+For more information, see the [Auth Service documentation](docs/auth.md).
+
+### Running the Auth Service Locally
+
+```bash
+# Start the Auth Service and OpenFGA
+docker-compose -f docker/auth/docker-compose.yml up -d
+```
+
+### Deploying to Kubernetes
+
+```bash
+# Deploy the Auth Service and OpenFGA
+kubectl apply -k kubernetes/base/auth
+kubectl apply -k kubernetes/base/openfga
 ```
 
 ## Docker Configurations

@@ -10,6 +10,7 @@ Welcome to the comprehensive documentation for the NeuralLog infrastructure. Thi
 - [Kubernetes Configuration Guide](kubernetes.md): Documentation for Kubernetes resources
 - [Docker Configuration Guide](docker.md): Documentation for Docker configurations
 - [Redis Configuration Guide](redis.md): Documentation for Redis setup
+- [Auth Service Guide](auth.md): Documentation for the Auth Service
 - [Development Guide](development.md): Guide for developers working on the infrastructure
 - [Troubleshooting Guide](troubleshooting.md): Common issues and solutions
 - [Security Guide](security.md): Security considerations and best practices
@@ -32,11 +33,14 @@ infra/
 ├── kubernetes/           # Kubernetes configurations
 │   ├── base/             # Base Kubernetes resources
 │   │   ├── server/       # Server resources
-│   │   └── redis/        # Redis resources
+│   │   ├── redis/        # Redis resources
+│   │   ├── auth/         # Auth service resources
+│   │   └── openfga/      # OpenFGA resources
 │   └── overlays/         # Kustomize overlays
 │       └── test/         # Test environment
 ├── docker/               # Docker configurations
 │   ├── server/           # Server Docker files
+│   ├── auth/             # Auth service Docker files
 │   └── dev/              # Development Docker files
 ├── redis/                # Redis configuration
 │   ├── conf/             # Redis config files
