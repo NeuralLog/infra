@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Auth service
+  auth:
+    build:
+      context: ../../auth
+      dockerfile: ../infra/docker/auth/Dockerfile.dev
+    container_name: neurallog-auth
+    ports:
+      - "3040:3000"
+    volumes:
+      - ../../auth:/app
+      - auth_node_modules:/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - OPENFGA_HOST=openfga
+      - OPENFGA_PORT=8080
+      - OPENFGA_ADAPTER_TYPE=local
+      - LOG_LEVEL=debug
+    depends_on:
+      - openfga
+      - postgres
+    command: npm run dev
+
+  # OpenFGA service
+  openfga:
+    image: openfga/openfga:latest
+    container_name: neurallog-openfga
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "3000:3000"
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://postgres:postgres@postgres:5432/openfga
+      - OPENFGA_AUTHN_METHOD=none
+      - OPENFGA_LOG_LEVEL=info
+      - OPENFGA_PLAYGROUND_ENABLED=true
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  # PostgreSQL service
+  postgres:
+    image: postgres:14-alpine
+    container_name: neurallog-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=openfga
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  auth_node_modules:
+  postgres-data:
+    driver: local
