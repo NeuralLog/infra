@@ -1,0 +1,19 @@
+{
+  "name": "neurallog-admin",
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    }
+  ],
+  "env": {
+    "API_URL": "https://api.neurallog.io"
+  }
+}
