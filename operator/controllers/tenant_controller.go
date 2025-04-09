@@ -17,8 +17,12 @@ limitations under the License.
 package controllers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"reflect"
 	"time"
 
@@ -149,6 +153,12 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
+	// Reconcile Auth Service integration
+	if err := r.reconcileAuthService(ctx, tenant); err != nil {
+		logger.Error(err, "Failed to reconcile Auth Service integration")
+		return ctrl.Result{}, err
+	}
+
 	// Update status to Running if everything is provisioned
 	if tenant.Status.Phase == neurallogv1.TenantProvisioning {
 		tenant.Status.Phase = neurallogv1.TenantRunning
@@ -190,6 +200,15 @@ func (r *TenantReconciler) reconcileDelete(ctx context.Context, tenant *neurallo
 			return ctrl.Result{}, err
 		}
 		logger.Info("Deleted namespace", "namespace", tenant.Status.Namespace)
+	}
+
+	// Delete the tenant from the Auth service
+	if err := r.deleteTenantFromAuthService(ctx, tenant.Name); err != nil {
+		logger.Error(err, "Failed to delete tenant from Auth service")
+		// Don't return an error here, as we still want to remove the finalizer
+		// The tenant will be garbage collected by the Auth service
+	} else {
+		logger.Info("Deleted tenant from Auth service", "tenant", tenant.Name)
 	}
 
 	// Remove finalizer
@@ -391,6 +410,141 @@ func (r *TenantReconciler) reconcileNetworkPolicies(ctx context.Context, tenant 
 	// TODO: Implement Network Policy reconciliation
 	// This would include:
 	// - Creating/updating Network Policies based on tenant.Spec.NetworkPolicy
+
+	return nil
+}
+
+// reconcileAuthService integrates with the Auth service to manage tenant authentication
+func (r *TenantReconciler) reconcileAuthService(ctx context.Context, tenant *neurallogv1.Tenant) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Auth Service integration", "tenant", tenant.Name)
+
+	// Skip if the tenant is being deleted
+	if !tenant.ObjectMeta.DeletionTimestamp.IsZero() {
+		return nil
+	}
+
+	// Check if the tenant exists in the Auth service
+	exists, err := r.tenantExistsInAuthService(ctx, tenant.Name)
+	if err != nil {
+		logger.Error(err, "Failed to check if tenant exists in Auth service")
+		return err
+	}
+
+	// If the tenant doesn't exist in the Auth service, create it
+	if !exists {
+		if err := r.createTenantInAuthService(ctx, tenant.Name); err != nil {
+			logger.Error(err, "Failed to create tenant in Auth service")
+			return err
+		}
+		logger.Info("Created tenant in Auth service", "tenant", tenant.Name)
+	}
+
+	return nil
+}
+
+// tenantExistsInAuthService checks if a tenant exists in the Auth service
+func (r *TenantReconciler) tenantExistsInAuthService(ctx context.Context, tenantId string) (bool, error) {
+	logger := log.FromContext(ctx)
+
+	// Make a request to the Auth service to list tenants
+	resp, err := http.Get("http://auth:3000/api/tenants")
+	if err != nil {
+		logger.Error(err, "Failed to connect to Auth service")
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Error(err, "Failed to read response from Auth service")
+		return false, err
+	}
+
+	// Parse the response
+	var response struct {
+		Status  string   `json:"status"`
+		Tenants []string `json:"tenants"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		logger.Error(err, "Failed to parse response from Auth service")
+		return false, err
+	}
+
+	// Check if the tenant exists
+	for _, t := range response.Tenants {
+		if t == tenantId {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// createTenantInAuthService creates a tenant in the Auth service
+func (r *TenantReconciler) createTenantInAuthService(ctx context.Context, tenantId string) error {
+	logger := log.FromContext(ctx)
+
+	// Create the request body
+	reqBody, err := json.Marshal(map[string]string{
+		"tenantId":    tenantId,
+		"adminUserId": "system", // Default admin user
+	})
+	if err != nil {
+		logger.Error(err, "Failed to marshal request body")
+		return err
+	}
+
+	// Make a request to the Auth service to create a tenant
+	resp, err := http.Post("http://auth:3000/api/tenants", "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		logger.Error(err, "Failed to connect to Auth service")
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check the response status
+	if resp.StatusCode != http.StatusCreated {
+		// Read the response body for error details
+		body, _ := io.ReadAll(resp.Body)
+		logger.Error(nil, "Failed to create tenant in Auth service", "statusCode", resp.StatusCode, "response", string(body))
+		return fmt.Errorf("failed to create tenant in Auth service: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// deleteTenantFromAuthService deletes a tenant from the Auth service
+func (r *TenantReconciler) deleteTenantFromAuthService(ctx context.Context, tenantId string) error {
+	logger := log.FromContext(ctx)
+
+	// Create a DELETE request
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("http://auth:3000/api/tenants/%s", tenantId), nil)
+	if err != nil {
+		logger.Error(err, "Failed to create DELETE request")
+		return err
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Error(err, "Failed to connect to Auth service")
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check the response status
+	if resp.StatusCode != http.StatusOK {
+		// Read the response body for error details
+		body, _ := io.ReadAll(resp.Body)
+		logger.Error(nil, "Failed to delete tenant from Auth service", "statusCode", resp.StatusCode, "response", string(body))
+		return fmt.Errorf("failed to delete tenant from Auth service: %d", resp.StatusCode)
+	}
 
 	return nil
 }
