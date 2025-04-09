@@ -1,0 +1,1224 @@
+openapi: 3.0.0
+info:
+  title: NeuralLog Tenant API
+  version: v1
+  description: API for managing NeuralLog tenants
+paths:
+  /apis/neurallog.io/v1/tenants:
+    get:
+      summary: List all tenants
+      operationId: listTenants
+      tags:
+        - tenants
+      responses:
+        '200':
+          description: A list of tenants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantList'
+    post:
+      summary: Create a tenant
+      operationId: createTenant
+      tags:
+        - tenants
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+      responses:
+        '201':
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          description: Invalid request
+        '409':
+          description: Tenant already exists
+  /apis/neurallog.io/v1/tenants/{name}:
+    get:
+      summary: Get a tenant
+      operationId: getTenant
+      tags:
+        - tenants
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '404':
+          description: Tenant not found
+    put:
+      summary: Update a tenant
+      operationId: updateTenant
+      tags:
+        - tenants
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tenant'
+      responses:
+        '200':
+          description: Tenant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          description: Invalid request
+        '404':
+          description: Tenant not found
+    delete:
+      summary: Delete a tenant
+      operationId: deleteTenant
+      tags:
+        - tenants
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant deleted
+        '404':
+          description: Tenant not found
+  /apis/neurallog.io/v1/tenants/{name}/status:
+    get:
+      summary: Get tenant status
+      operationId: getTenantStatus
+      tags:
+        - tenants
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantStatus'
+        '404':
+          description: Tenant not found
+components:
+  schemas:
+    Tenant:
+      type: object
+      required:
+        - apiVersion
+        - kind
+        - metadata
+        - spec
+      properties:
+        apiVersion:
+          type: string
+          enum:
+            - neurallog.io/v1
+        kind:
+          type: string
+          enum:
+            - Tenant
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/TenantSpec'
+        status:
+          $ref: '#/components/schemas/TenantStatus'
+    TenantList:
+      type: object
+      required:
+        - apiVersion
+        - kind
+        - metadata
+        - items
+      properties:
+        apiVersion:
+          type: string
+          enum:
+            - neurallog.io/v1
+        kind:
+          type: string
+          enum:
+            - TenantList
+        metadata:
+          $ref: '#/components/schemas/ListMeta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+    TenantSpec:
+      type: object
+      properties:
+        displayName:
+          type: string
+          description: User-friendly name for the tenant
+          maxLength: 63
+          pattern: '^[a-zA-Z0-9]([a-zA-Z0-9\-\_\.]*[a-zA-Z0-9])?$'
+        description:
+          type: string
+          description: Additional information about the tenant
+        version:
+          type: string
+          description: Version of NeuralLog to deploy
+          pattern: '^v?([0-9]+)(\.[0-9]+)?(\.[0-9]+)?(-([0-9A-Za-z\-]+(\.[0-9A-Za-z\-]+)*))?(\+([0-9A-Za-z\-]+(\.[0-9A-Za-z\-]+)*))?$'
+        upgradeStrategy:
+          $ref: '#/components/schemas/UpgradeStrategy'
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        server:
+          $ref: '#/components/schemas/ServerSpec'
+        redis:
+          $ref: '#/components/schemas/RedisSpec'
+        networkPolicy:
+          $ref: '#/components/schemas/NetworkPolicySpec'
+        monitoring:
+          $ref: '#/components/schemas/MonitoringSpec'
+        backup:
+          $ref: '#/components/schemas/BackupSpec'
+        lifecycle:
+          $ref: '#/components/schemas/LifecycleSpec'
+        integrations:
+          $ref: '#/components/schemas/IntegrationsSpec'
+    UpgradeStrategy:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Type of upgrade strategy
+          enum:
+            - RollingUpdate
+            - Recreate
+          default: RollingUpdate
+        maxUnavailable:
+          type: string
+          description: Maximum number of pods that can be unavailable during the update
+        maxSurge:
+          type: string
+          description: Maximum number of pods that can be scheduled above the desired number of pods
+    ResourceRequirements:
+      type: object
+      properties:
+        cpu:
+          $ref: '#/components/schemas/ResourceLimit'
+        memory:
+          $ref: '#/components/schemas/ResourceLimit'
+        storage:
+          $ref: '#/components/schemas/ResourceLimit'
+    ResourceLimit:
+      type: object
+      properties:
+        limit:
+          type: string
+          description: Maximum amount of the resource
+        request:
+          type: string
+          description: Minimum amount of the resource
+    ServerSpec:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          description: Number of server instances
+          minimum: 1
+          default: 1
+        image:
+          type: string
+          description: Docker image for the server
+          default: neurallog/server:latest
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        env:
+          type: array
+          description: Environment variables for the server
+          items:
+            $ref: '#/components/schemas/EnvVar'
+        deployment:
+          $ref: '#/components/schemas/DeploymentSpec'
+        autoscaling:
+          $ref: '#/components/schemas/AutoscalingSpec'
+        affinity:
+          $ref: '#/components/schemas/AffinitySpec'
+        securityContext:
+          $ref: '#/components/schemas/SecurityContextSpec'
+        probes:
+          $ref: '#/components/schemas/ProbesSpec'
+        logLevel:
+          type: string
+          description: Log level for the server
+          enum:
+            - debug
+            - info
+            - warn
+            - error
+          default: info
+        api:
+          $ref: '#/components/schemas/APISpec'
+    DeploymentSpec:
+      type: object
+      properties:
+        strategy:
+          type: string
+          description: Deployment strategy
+          enum:
+            - RollingUpdate
+            - Recreate
+          default: RollingUpdate
+        rollingUpdate:
+          $ref: '#/components/schemas/RollingUpdateSpec'
+    RollingUpdateSpec:
+      type: object
+      properties:
+        maxUnavailable:
+          type: string
+          description: Maximum number of pods that can be unavailable during the update
+          default: 25%
+        maxSurge:
+          type: string
+          description: Maximum number of pods that can be scheduled above the desired number of pods
+          default: 25%
+    AutoscalingSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether autoscaling is enabled
+          default: false
+        minReplicas:
+          type: integer
+          description: Minimum number of replicas
+          minimum: 1
+          default: 1
+        maxReplicas:
+          type: integer
+          description: Maximum number of replicas
+          minimum: 1
+          default: 10
+        targetCPUUtilizationPercentage:
+          type: integer
+          description: Target CPU utilization percentage
+          minimum: 1
+          maximum: 100
+          default: 80
+        targetMemoryUtilizationPercentage:
+          type: integer
+          description: Target memory utilization percentage
+          minimum: 1
+          maximum: 100
+    AffinitySpec:
+      type: object
+      properties:
+        nodeAffinity:
+          type: object
+          description: Node affinity configuration
+        podAffinity:
+          type: object
+          description: Pod affinity configuration
+        podAntiAffinity:
+          type: object
+          description: Pod anti-affinity configuration
+    SecurityContextSpec:
+      type: object
+      properties:
+        runAsUser:
+          type: integer
+          description: User ID to run as
+        runAsGroup:
+          type: integer
+          description: Group ID to run as
+        runAsNonRoot:
+          type: boolean
+          description: Whether to run as a non-root user
+          default: true
+        readOnlyRootFilesystem:
+          type: boolean
+          description: Whether to use a read-only root filesystem
+          default: true
+        allowPrivilegeEscalation:
+          type: boolean
+          description: Whether to allow privilege escalation
+          default: false
+        capabilities:
+          type: object
+          properties:
+            add:
+              type: array
+              description: Capabilities to add
+              items:
+                type: string
+            drop:
+              type: array
+              description: Capabilities to drop
+              items:
+                type: string
+              default:
+                - ALL
+    ProbesSpec:
+      type: object
+      properties:
+        liveness:
+          $ref: '#/components/schemas/ProbeSpec'
+        readiness:
+          $ref: '#/components/schemas/ProbeSpec'
+        startup:
+          $ref: '#/components/schemas/ProbeSpec'
+    ProbeSpec:
+      type: object
+      properties:
+        path:
+          type: string
+          description: HTTP path to probe
+          default: /health
+        port:
+          type: integer
+          description: Port to probe
+          default: 3030
+        initialDelaySeconds:
+          type: integer
+          description: Initial delay in seconds
+          default: 15
+        periodSeconds:
+          type: integer
+          description: Period in seconds
+          default: 10
+        timeoutSeconds:
+          type: integer
+          description: Timeout in seconds
+          default: 5
+        successThreshold:
+          type: integer
+          description: Success threshold
+          default: 1
+        failureThreshold:
+          type: integer
+          description: Failure threshold
+          default: 3
+    APISpec:
+      type: object
+      properties:
+        authentication:
+          $ref: '#/components/schemas/AuthenticationSpec'
+        cors:
+          $ref: '#/components/schemas/CORSSpec'
+        rateLimit:
+          $ref: '#/components/schemas/RateLimitSpec'
+    AuthenticationSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether authentication is enabled
+          default: true
+        type:
+          type: string
+          description: Authentication type
+          enum:
+            - apiKey
+            - jwt
+            - oauth2
+          default: apiKey
+        apiKey:
+          $ref: '#/components/schemas/APIKeySpec'
+        jwt:
+          $ref: '#/components/schemas/JWTSpec'
+        oauth2:
+          $ref: '#/components/schemas/OAuth2Spec'
+    APIKeySpec:
+      type: object
+      properties:
+        secretRef:
+          $ref: '#/components/schemas/SecretKeySelector'
+        header:
+          type: string
+          description: Header name for the API key
+          default: X-API-Key
+    JWTSpec:
+      type: object
+      properties:
+        secretRef:
+          $ref: '#/components/schemas/SecretKeySelector'
+        issuer:
+          type: string
+          description: JWT issuer
+        audience:
+          type: string
+          description: JWT audience
+    OAuth2Spec:
+      type: object
+      properties:
+        clientID:
+          type: string
+          description: OAuth2 client ID
+        clientSecret:
+          $ref: '#/components/schemas/SecretKeySelector'
+        authorizationURL:
+          type: string
+          description: OAuth2 authorization URL
+        tokenURL:
+          type: string
+          description: OAuth2 token URL
+        scopes:
+          type: array
+          description: OAuth2 scopes
+          items:
+            type: string
+    CORSSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether CORS is enabled
+          default: true
+        allowOrigins:
+          type: array
+          description: Allowed origins
+          items:
+            type: string
+          default:
+            - '*'
+        allowMethods:
+          type: array
+          description: Allowed methods
+          items:
+            type: string
+          default:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+        allowHeaders:
+          type: array
+          description: Allowed headers
+          items:
+            type: string
+          default:
+            - Content-Type
+            - Authorization
+        exposeHeaders:
+          type: array
+          description: Exposed headers
+          items:
+            type: string
+        maxAge:
+          type: integer
+          description: Max age in seconds
+          default: 86400
+    RateLimitSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether rate limiting is enabled
+          default: true
+        requestsPerSecond:
+          type: integer
+          description: Number of requests per second
+          minimum: 1
+          default: 100
+        burstSize:
+          type: integer
+          description: Burst size
+          minimum: 1
+          default: 200
+    RedisSpec:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          description: Number of Redis instances
+          minimum: 1
+          default: 1
+        image:
+          type: string
+          description: Docker image for Redis
+          default: redis:7-alpine
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        storage:
+          type: string
+          description: Storage size for Redis
+          default: 1Gi
+        config:
+          type: object
+          description: Additional Redis configuration
+          additionalProperties:
+            type: string
+        mode:
+          type: string
+          description: Redis mode
+          enum:
+            - standalone
+            - sentinel
+            - cluster
+          default: standalone
+        persistence:
+          $ref: '#/components/schemas/RedisPersistenceSpec'
+        security:
+          $ref: '#/components/schemas/RedisSecuritySpec'
+        advanced:
+          $ref: '#/components/schemas/RedisAdvancedSpec'
+    RedisPersistenceSpec:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Persistence type
+          enum:
+            - aof
+            - rdb
+            - both
+          default: aof
+        fsync:
+          type: string
+          description: Fsync policy
+          enum:
+            - everysec
+            - always
+            - 'no'
+          default: everysec
+        savePoints:
+          type: array
+          description: RDB save points
+          items:
+            type: string
+          default:
+            - 900 1
+            - 300 10
+            - 60 10000
+    RedisSecuritySpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether security is enabled
+          default: true
+        authSecret:
+          $ref: '#/components/schemas/SecretKeySelector'
+        tls:
+          $ref: '#/components/schemas/RedisTLSSpec'
+    RedisTLSSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether TLS is enabled
+          default: false
+        certSecret:
+          $ref: '#/components/schemas/SecretKeySelector'
+    RedisAdvancedSpec:
+      type: object
+      properties:
+        maxmemoryPolicy:
+          type: string
+          description: Max memory policy
+          enum:
+            - allkeys-lru
+            - volatile-lru
+            - allkeys-random
+            - volatile-random
+            - volatile-ttl
+            - noeviction
+          default: allkeys-lru
+        clientOutputBufferLimit:
+          type: string
+          description: Client output buffer limit
+          default: normal 0 0 0
+        databases:
+          type: integer
+          description: Number of databases
+          minimum: 1
+          default: 16
+        tcpKeepalive:
+          type: integer
+          description: TCP keepalive interval in seconds
+          minimum: 0
+          default: 300
+    NetworkPolicySpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether network policies are enabled
+          default: true
+        allowedNamespaces:
+          type: array
+          description: Namespaces that can access the tenant
+          items:
+            type: string
+        ingressRules:
+          type: array
+          description: Custom ingress rules
+          items:
+            $ref: '#/components/schemas/NetworkPolicyRule'
+        egressRules:
+          type: array
+          description: Custom egress rules
+          items:
+            $ref: '#/components/schemas/NetworkPolicyRule'
+    NetworkPolicyRule:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Description of the rule
+        from:
+          type: object
+          description: Source selector for ingress rules
+          additionalProperties:
+            type: string
+        to:
+          type: object
+          description: Destination selector for egress rules
+          additionalProperties:
+            type: string
+        ports:
+          type: array
+          description: Ports for the rule
+          items:
+            $ref: '#/components/schemas/NetworkPolicyPort'
+    NetworkPolicyPort:
+      type: object
+      properties:
+        protocol:
+          type: string
+          description: Protocol for the port
+          enum:
+            - TCP
+            - UDP
+          default: TCP
+        port:
+          type: integer
+          description: Port number
+    MonitoringSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether monitoring is enabled
+          default: true
+        prometheus:
+          $ref: '#/components/schemas/PrometheusSpec'
+        alerts:
+          $ref: '#/components/schemas/AlertsSpec'
+    PrometheusSpec:
+      type: object
+      properties:
+        scrape:
+          type: boolean
+          description: Whether Prometheus should scrape metrics
+          default: true
+        port:
+          type: integer
+          description: Port to scrape metrics from
+          default: 3030
+        path:
+          type: string
+          description: Path to scrape metrics from
+          default: /metrics
+        interval:
+          type: string
+          description: Interval at which to scrape metrics
+          default: 15s
+    AlertsSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether alerts are enabled
+          default: true
+        receivers:
+          type: array
+          description: Alert receivers
+          items:
+            $ref: '#/components/schemas/AlertReceiver'
+    AlertReceiver:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Name of the receiver
+        email:
+          type: string
+          description: Email address to send alerts to
+        slack:
+          $ref: '#/components/schemas/SlackReceiver'
+    SlackReceiver:
+      type: object
+      properties:
+        webhookURL:
+          type: string
+          description: Slack webhook URL
+        channel:
+          type: string
+          description: Slack channel to send alerts to
+    BackupSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether backups are enabled
+          default: true
+        schedule:
+          type: string
+          description: Cron schedule for backups
+          default: 0 2 * * *
+        retention:
+          $ref: '#/components/schemas/BackupRetention'
+        storage:
+          $ref: '#/components/schemas/BackupStorage'
+    BackupRetention:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Number of backups to retain
+          minimum: 1
+          default: 7
+        days:
+          type: integer
+          description: Number of days to retain backups
+          minimum: 1
+          default: 30
+    BackupStorage:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Type of storage
+          enum:
+            - s3
+            - gcs
+            - azure
+            - local
+          default: local
+        bucket:
+          type: string
+          description: Storage bucket
+        prefix:
+          type: string
+          description: Storage prefix
+        secretRef:
+          $ref: '#/components/schemas/SecretKeySelector'
+    LifecycleSpec:
+      type: object
+      properties:
+        preCreate:
+          $ref: '#/components/schemas/LifecycleHandler'
+        postCreate:
+          $ref: '#/components/schemas/LifecycleHandler'
+        preDelete:
+          $ref: '#/components/schemas/LifecycleHandler'
+        postDelete:
+          $ref: '#/components/schemas/LifecycleHandler'
+    LifecycleHandler:
+      type: object
+      properties:
+        exec:
+          $ref: '#/components/schemas/ExecHandler'
+        http:
+          $ref: '#/components/schemas/HTTPHandler'
+    ExecHandler:
+      type: object
+      required:
+        - command
+      properties:
+        command:
+          type: array
+          description: Command to execute
+          items:
+            type: string
+    HTTPHandler:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          description: URL to send the request to
+        method:
+          type: string
+          description: HTTP method to use
+          enum:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+          default: POST
+        headers:
+          type: object
+          description: HTTP headers to include
+          additionalProperties:
+            type: string
+        body:
+          type: string
+          description: HTTP request body
+    IntegrationsSpec:
+      type: object
+      properties:
+        ingress:
+          $ref: '#/components/schemas/IngressSpec'
+        serviceMesh:
+          $ref: '#/components/schemas/ServiceMeshSpec'
+    IngressSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether ingress is enabled
+          default: false
+        annotations:
+          type: object
+          description: Annotations for the ingress
+          additionalProperties:
+            type: string
+        hosts:
+          type: array
+          description: Ingress hosts
+          items:
+            $ref: '#/components/schemas/IngressHost'
+        tls:
+          type: array
+          description: Ingress TLS configuration
+          items:
+            $ref: '#/components/schemas/IngressTLS'
+    IngressHost:
+      type: object
+      required:
+        - host
+      properties:
+        host:
+          type: string
+          description: Hostname
+        paths:
+          type: array
+          description: Ingress paths
+          items:
+            $ref: '#/components/schemas/IngressPath'
+    IngressPath:
+      type: object
+      required:
+        - path
+      properties:
+        path:
+          type: string
+          description: Path
+        pathType:
+          type: string
+          description: Path type
+          enum:
+            - Exact
+            - Prefix
+            - ImplementationSpecific
+          default: Prefix
+    IngressTLS:
+      type: object
+      properties:
+        secretName:
+          type: string
+          description: Name of the TLS secret
+        hosts:
+          type: array
+          description: Hosts to apply TLS to
+          items:
+            type: string
+    ServiceMeshSpec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether service mesh is enabled
+          default: false
+        type:
+          type: string
+          description: Type of service mesh
+          enum:
+            - istio
+            - linkerd
+            - consul
+    TenantStatus:
+      type: object
+      properties:
+        conditions:
+          type: array
+          description: Latest available observations of the tenant's state
+          items:
+            $ref: '#/components/schemas/Condition'
+        phase:
+          type: string
+          description: Current phase of the tenant
+          enum:
+            - Pending
+            - Provisioning
+            - Running
+            - Failed
+            - Terminating
+        namespace:
+          type: string
+          description: Namespace created for the tenant
+        serverStatus:
+          $ref: '#/components/schemas/ComponentStatus'
+        redisStatus:
+          $ref: '#/components/schemas/ComponentStatus'
+        observedGeneration:
+          type: integer
+          description: Most recent generation observed by the controller
+        lastReconcileTime:
+          type: string
+          format: date-time
+          description: Last time the tenant was reconciled
+        components:
+          type: object
+          description: Status of all components
+          additionalProperties:
+            $ref: '#/components/schemas/ComponentStatus'
+        urls:
+          $ref: '#/components/schemas/URLStatus'
+        metrics:
+          $ref: '#/components/schemas/MetricsStatus'
+        backupStatus:
+          $ref: '#/components/schemas/BackupStatus'
+    ComponentStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          description: Current phase of the component
+          enum:
+            - Pending
+            - Running
+            - Failed
+        message:
+          type: string
+          description: Additional information about the component status
+        readyReplicas:
+          type: integer
+          description: Number of ready replicas
+        totalReplicas:
+          type: integer
+          description: Total number of replicas
+        lastTransitionTime:
+          type: string
+          format: date-time
+          description: Last time the component phase changed
+        url:
+          type: string
+          description: URL for accessing the component
+        version:
+          type: string
+          description: Version of the component
+        metrics:
+          type: object
+          description: Component metrics
+          additionalProperties:
+            type: string
+    URLStatus:
+      type: object
+      properties:
+        server:
+          type: string
+          description: URL for accessing the server
+        api:
+          type: string
+          description: URL for accessing the API
+        dashboard:
+          type: string
+          description: URL for accessing the dashboard
+    MetricsStatus:
+      type: object
+      properties:
+        cpu:
+          type: string
+          description: CPU usage in millicores
+        memory:
+          type: string
+          description: Memory usage
+        storage:
+          type: string
+          description: Storage usage
+        connections:
+          type: integer
+          description: Number of connections
+        requestsPerSecond:
+          type: number
+          description: Number of requests per second
+        averageResponseTime:
+          type: number
+          description: Average response time in milliseconds
+    BackupStatus:
+      type: object
+      properties:
+        lastBackupTime:
+          type: string
+          format: date-time
+          description: Last time a backup was taken
+        lastBackupSize:
+          type: string
+          description: Size of the last backup
+        lastBackupStatus:
+          type: string
+          description: Status of the last backup
+        backupCount:
+          type: integer
+          description: Number of backups
+        nextBackupTime:
+          type: string
+          format: date-time
+          description: Next scheduled backup time
+    EnvVar:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Name of the environment variable
+        value:
+          type: string
+          description: Value of the environment variable
+        valueFrom:
+          $ref: '#/components/schemas/EnvVarSource'
+    EnvVarSource:
+      type: object
+      properties:
+        configMapKeyRef:
+          $ref: '#/components/schemas/ConfigMapKeySelector'
+        secretKeyRef:
+          $ref: '#/components/schemas/SecretKeySelector'
+    ConfigMapKeySelector:
+      type: object
+      required:
+        - name
+        - key
+      properties:
+        name:
+          type: string
+          description: Name of the ConfigMap
+        key:
+          type: string
+          description: Key in the ConfigMap
+        optional:
+          type: boolean
+          description: Whether the ConfigMap or key must exist
+    SecretKeySelector:
+      type: object
+      required:
+        - name
+        - key
+      properties:
+        name:
+          type: string
+          description: Name of the Secret
+        key:
+          type: string
+          description: Key in the Secret
+        optional:
+          type: boolean
+          description: Whether the Secret or key must exist
+    Condition:
+      type: object
+      required:
+        - type
+        - status
+        - lastTransitionTime
+        - reason
+        - message
+      properties:
+        type:
+          type: string
+          description: Type of condition
+        status:
+          type: string
+          description: Status of the condition
+          enum:
+            - 'True'
+            - 'False'
+            - Unknown
+        lastTransitionTime:
+          type: string
+          format: date-time
+          description: Last time the condition transitioned from one status to another
+        reason:
+          type: string
+          description: Reason for the condition's last transition
+        message:
+          type: string
+          description: Human-readable message indicating details about the transition
+    ObjectMeta:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name of the object
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Labels attached to the object
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          description: Annotations attached to the object
+        creationTimestamp:
+          type: string
+          format: date-time
+          description: Time when the object was created
+        deletionTimestamp:
+          type: string
+          format: date-time
+          description: Time when the object was deleted
+        finalizers:
+          type: array
+          items:
+            type: string
+          description: Finalizers attached to the object
+        generation:
+          type: integer
+          description: Generation of the object
+        resourceVersion:
+          type: string
+          description: Resource version of the object
+        uid:
+          type: string
+          description: UID of the object
+    ListMeta:
+      type: object
+      properties:
+        continue:
+          type: string
+          description: Continue token for pagination
+        resourceVersion:
+          type: string
+          description: Resource version of the list
+        selfLink:
+          type: string
+          description: Self link of the list
+        remainingItemCount:
+          type: integer
+          description: Remaining item count
