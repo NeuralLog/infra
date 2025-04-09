@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import {
   Box,
   Table,
@@ -59,6 +59,7 @@ export function TenantList() {
   const toast = useToast()
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [tenantToDelete, setTenantToDelete] = useState<string | null>(null)
+  const cancelRef = React.useRef<HTMLButtonElement>(null)
 
   const handleDelete = async () => {
     if (!tenantToDelete) return
@@ -67,7 +68,7 @@ export function TenantList() {
       await fetch(`/api/tenants/${tenantToDelete}`, {
         method: 'DELETE',
       })
-      
+
       toast({
         title: 'Tenant deleted',
         description: `Tenant ${tenantToDelete} has been deleted successfully.`,
@@ -75,7 +76,7 @@ export function TenantList() {
         duration: 5000,
         isClosable: true,
       })
-      
+
       mutate()
     } catch (error) {
       toast({
@@ -234,7 +235,7 @@ export function TenantList() {
         </Table>
       )}
 
-      <AlertDialog isOpen={isOpen} onClose={onClose} leastDestructiveRef={undefined}>
+      <AlertDialog isOpen={isOpen} onClose={onClose} leastDestructiveRef={cancelRef}>
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
@@ -246,7 +247,7 @@ export function TenantList() {
             </AlertDialogBody>
 
             <AlertDialogFooter>
-              <Button onClick={onClose}>Cancel</Button>
+              <Button ref={cancelRef} onClick={onClose}>Cancel</Button>
               <Button colorScheme="red" onClick={handleDelete} ml={3}>
                 Delete
               </Button>
