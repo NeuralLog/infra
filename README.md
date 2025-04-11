@@ -24,6 +24,7 @@ infra/
 ├── scripts/              # Utility scripts
 │   ├── *.ps1             # PowerShell scripts for Windows
 │   └── *.sh              # Bash scripts for Linux/macOS
+├── docker-compose.*.yml  # Docker Compose files for different components
 └── README.md             # Repository documentation
 ```
 
@@ -35,7 +36,8 @@ infra/
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
 - [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) (for local Kubernetes testing)
 - [Git](https://git-scm.com/downloads)
-- [Node.js](https://nodejs.org/) (for development)
+- [Node.js](https://nodejs.org/) v22 or later (for development)
+- [PowerShell](https://docs.microsoft.com/en-us/powershell/) (for Windows users)
 
 ### Initializing the Development Environment
 
@@ -57,7 +59,9 @@ This script will:
 
 ### Development Environment
 
-To start the development environment:
+There are two ways to start the development environment:
+
+#### 1. Using the legacy development environment
 
 ```powershell
 # Windows (PowerShell)
@@ -71,16 +75,32 @@ This will start:
 - NeuralLog server on http://localhost:3030
 - Redis on port 6379
 - Redis Commander on http://localhost:8081
-- Auth service on http://localhost:3040
-- OpenFGA on http://localhost:8080
 
-To stop the development environment:
+#### 2. Using the complete development environment
 
 ```powershell
 # Windows (PowerShell)
+.\scripts\Start-All.ps1
+```
+
+This will start:
+- Verdaccio private npm registry on http://localhost:4873
+- Redis on port 6379
+- PostgreSQL on port 5432
+- OpenFGA on http://localhost:8080
+- Auth service on http://localhost:3040
+- Logs server on http://localhost:3030
+
+### Stopping the Development Environment
+
+```powershell
+# For the legacy environment
 .\scripts\Stop-DevEnvironment.ps1
 
-# Linux/macOS (Bash)
+# For the complete environment
+.\scripts\Stop-All.ps1
+
+# Linux/macOS (Bash, legacy environment only)
 ./scripts/stop-dev-env.sh
 ```
 
@@ -167,9 +187,9 @@ For more information, see the [Auth Service documentation](docs/auth.md).
 
 ### Running the Auth Service Locally
 
-```bash
+```powershell
 # Start the Auth Service and OpenFGA
-docker-compose -f docker/auth/docker-compose.yml up -d
+docker-compose -f docker-compose.auth.yml up -d
 ```
 
 ### Deploying to Kubernetes
@@ -187,4 +207,89 @@ Docker configurations for the NeuralLog server are located in the `docker` direc
 - **Production**: `docker/server/Dockerfile`
 - **Development**: `docker/dev/Dockerfile.dev`
 
-The development environment is configured using Docker Compose in `docker/dev/docker-compose.dev.yml`.
+The development environment is configured using Docker Compose files in the root directory:
+
+- **docker-compose.combined.yml**: Combined configuration for all components
+- **docker-compose.web.yml**: Configuration for the web application and Verdaccio
+- **docker-compose.server.yml**: Configuration for the logs server and Redis
+- **docker-compose.auth.yml**: Configuration for the auth service, PostgreSQL, and OpenFGA
+
+Additionally, there's a development-specific Docker Compose file in `docker/dev/docker-compose.dev.yml`.
+
+## Package Management
+
+NeuralLog uses private packages for sharing code between components. These packages are published to a private Verdaccio registry.
+
+### Shared Package
+
+The `@neurallog/shared` package contains common types and utilities used across all NeuralLog components.
+
+#### Publishing the Shared Package
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Publish-Shared.ps1
+```
+
+This script will:
+- Start Verdaccio if it's not already running
+- Configure npm to use the private registry for the @neurallog scope
+- Build the shared package
+- Publish the package to the private registry
+
+#### Updating the Shared Package in All Repositories
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Update-Shared.ps1 [version]
+```
+
+This script will install the specified version (or latest by default) of the shared package in all repositories.
+
+### TypeScript SDK
+
+The `@neurallog/sdk` package provides a client library for interacting with the NeuralLog server.
+
+#### Publishing the SDK
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Publish-SDK.ps1
+```
+
+This script will:
+- Start Verdaccio if it's not already running
+- Configure npm to use the private registry for the @neurallog scope
+- Build the SDK
+- Publish the SDK to the private registry
+
+## Repository Management
+
+Since NeuralLog is not a monorepo, we provide scripts to help manage the multiple repositories:
+
+### Checking Repository Status
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Repo-Status.ps1
+```
+
+This script will show the git status of all repositories.
+
+### Pulling All Repositories
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Pull-All.ps1
+```
+
+This script will pull the latest changes for all repositories.
+
+### Pushing All Repositories
+
+```powershell
+# Windows (PowerShell)
+.\scripts\Push-All.ps1 "Commit message"
+```
+
+This script will commit and push changes for all repositories with the specified commit message.

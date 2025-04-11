@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # Verdaccio private npm registry
+  verdaccio:
+    image: verdaccio/verdaccio:latest
+    container_name: verdaccio
+    ports:
+      - "4873:4873"
+    volumes:
+      - verdaccio-storage:/verdaccio/storage
+      - verdaccio-conf:/verdaccio/conf
+      - verdaccio-plugins:/verdaccio/plugins
+    networks:
+      - neurallog-network
+    restart: unless-stopped
+
+  # Web application
+  web:
+    image: node:22-alpine
+    container_name: neurallog-web
+    working_dir: /app
+    volumes:
+      - ../web:/app
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_AUTH_SERVICE_API_URL: http://auth-service:3040
+      NEXT_PUBLIC_AUTH_SERVICE_API_KEY: dev-api-key
+      LOGS_API_URL: http://neurallog-server:3030
+      NEXT_PUBLIC_LOGS_SERVICE_API_URL: http://localhost:3030
+      REDIS_HOST: neurallog-redis
+      REDIS_PORT: 6379
+      TENANT_ID: default
+    ports:
+      - "3000:3000"
+    command: sh -c "npm config set registry http://verdaccio:4873 ; npm install ; npx next dev"
+    networks:
+      - neurallog-network
+    depends_on:
+      - verdaccio
+    restart: unless-stopped
+
+volumes:
+  verdaccio-storage:
+  verdaccio-conf:
+  verdaccio-plugins:
+
+networks:
+  neurallog-network:
+    external: true

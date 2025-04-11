@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Redis for logs storage
+  redis:
+    image: redis:7.0-alpine
+    container_name: neurallog-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - neurallog-network
+    restart: unless-stopped
+
+  # Logs server
+  server:
+    image: node:22-alpine
+    container_name: neurallog-server
+    working_dir: /app
+    volumes:
+      - ../server:/app
+    environment:
+      NODE_ENV: development
+      PORT: 3030
+      STORAGE_TYPE: redis
+      REDIS_HOST: neurallog-redis
+      REDIS_PORT: 6379
+      DEFAULT_NAMESPACE: default
+    ports:
+      - "3030:3030"
+    command: sh -c "npm config set registry http://verdaccio:4873 ; npm install ; npm run build ; npm start"
+    networks:
+      - neurallog-network
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+
+networks:
+  neurallog-network:
+    external: true
