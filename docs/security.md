@@ -21,14 +21,30 @@ This guide provides detailed information about the security measures implemented
 
 NeuralLog is designed with security in mind, implementing multiple layers of security:
 
-### Multi-Tenant Isolation
+### Multi-Tenant Architecture
 
-Each tenant has complete isolation:
+NeuralLog uses a hybrid multi-tenant architecture with both shared and dedicated components:
 
-1. **Namespace Isolation**: Dedicated Kubernetes namespace
-2. **Network Isolation**: Network policies restrict communication
-3. **Resource Isolation**: Dedicated resources for each tenant
-4. **Data Isolation**: Dedicated Redis instance for each tenant
+#### Global Shared Components
+
+1. **Auth Service**: A single global auth service instance serving all tenants
+2. **OpenFGA**: A single global OpenFGA instance for authorization across all tenants
+3. **Auth0**: A single global Auth0 tenant for user authentication
+4. **PostgreSQL**: A single global database for OpenFGA and Auth Service data
+
+#### Tenant-Specific Dedicated Components
+
+1. **Web Server**: Dedicated web application instance per tenant
+2. **Logs Server**: Dedicated logs server instance per tenant
+3. **Redis**: One Redis instance per tenant, shared between auth and logs services
+
+#### Isolation Mechanisms
+
+1. **Namespace Isolation**: Each tenant gets a dedicated Kubernetes namespace
+2. **Network Isolation**: Network policies restrict communication between namespaces
+3. **Resource Isolation**: Resource quotas and limits prevent resource contention
+4. **Data Isolation**: Tenant-specific data is stored in dedicated instances
+5. **Logical Isolation**: OpenFGA enforces tenant boundaries through authorization
 
 ### Defense in Depth
 
@@ -99,9 +115,9 @@ metadata:
   namespace: <namespace>
 ```
 
-### Role-Based Access Control
+### Kubernetes RBAC
 
-RBAC is used for fine-grained access control:
+Kubernetes RBAC is used for infrastructure access control:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -118,6 +134,41 @@ rules:
   - get
   - list
 ```
+
+### OpenFGA Role-Based Access Control
+
+NeuralLog uses OpenFGA for application-level role-based access control:
+
+#### Role Hierarchy
+
+1. **System Roles**:
+   - **System Admin**: Full access to all tenants and resources
+   - **Tenant Admin**: Full access to a specific tenant
+   - **Organization Admin**: Full access to a specific organization
+   - **User**: Basic user access
+
+2. **Resource-Specific Roles**:
+   - **Log Owner**: Full access to a specific log
+   - **Log Writer**: Can write to a specific log
+   - **Log Reader**: Can read a specific log
+   - **API Key Manager**: Can manage API keys
+
+#### Permission Model
+
+1. **Permission Format**: `resource:action`
+   - Example: `logs:read`, `users:delete`, `apikeys:manage`
+
+2. **Permission Inheritance**:
+   - Roles can inherit permissions from other roles
+   - Higher-level roles automatically include lower-level permissions
+
+3. **Resource Ownership**:
+   - Resources have owners with full control
+   - Ownership can be at user, organization, or tenant level
+
+4. **Tenant Context**:
+   - All permissions are scoped to a tenant
+   - Cross-tenant access is strictly controlled
 
 ## Network Security
 

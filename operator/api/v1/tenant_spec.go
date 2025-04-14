@@ -38,6 +38,10 @@ type TenantSpec struct {
 	// +optional
 	Redis RedisSpec `json:"redis,omitempty"`
 
+	// Registry defines the configuration for the Endpoint Registry service
+	// +optional
+	Registry RegistrySpec `json:"registry,omitempty"`
+
 	// NetworkPolicy defines the network policy configuration for the tenant
 	// +optional
 	NetworkPolicy NetworkPolicySpec `json:"networkPolicy,omitempty"`
@@ -109,6 +113,25 @@ type RedisSpec struct {
 	// Config defines additional Redis configuration
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
+}
+
+// RegistrySpec defines the configuration for the Endpoint Registry service
+type RegistrySpec struct {
+	// Replicas is the number of Registry instances
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Image is the Docker image for the Registry
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// Resources defines the resource limits and requests for the Registry
+	// +optional
+	Resources ResourceRequirements `json:"resources,omitempty"`
+
+	// BaseDomain is the base domain for endpoint URLs
+	// +optional
+	BaseDomain string `json:"baseDomain,omitempty"`
 }
 
 // NetworkPolicySpec defines the network policy configuration for the tenant

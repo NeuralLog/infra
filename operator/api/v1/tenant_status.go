@@ -41,6 +41,10 @@ type TenantStatus struct {
 	// RedisStatus represents the status of the Redis deployment
 	// +optional
 	RedisStatus ComponentStatus `json:"redisStatus,omitempty"`
+
+	// RegistryStatus represents the status of the registry deployment
+	// +optional
+	RegistryStatus ComponentStatus `json:"registryStatus,omitempty"`
 }
 
 // TenantPhase represents the phase of a tenant

@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	appsv1 "k8s.io/api/apps/v1"
 	neurallogv1 "github.com/neurallog/operator/api/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -147,6 +147,12 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
+	// Reconcile Registry resources
+	if err := r.reconcileRegistry(ctx, tenant); err != nil {
+		logger.Error(err, "Failed to reconcile Registry")
+		return ctrl.Result{}, err
+	}
+
 	// Reconcile Network Policies
 	if err := r.reconcileNetworkPolicies(ctx, tenant); err != nil {
 		logger.Error(err, "Failed to reconcile Network Policies")
@@ -242,7 +248,7 @@ func (r *TenantReconciler) reconcileNamespace(ctx context.Context, tenant *neura
 				ObjectMeta: metav1.ObjectMeta{
 					Name: namespaceName,
 					Labels: map[string]string{
-						"neurallog.io/tenant": tenant.Name,
+						"neurallog.io/tenant":     tenant.Name,
 						"neurallog.io/managed-by": "tenant-operator",
 					},
 				},
@@ -597,9 +603,9 @@ logfile ""
 			Name:      configMapName,
 			Namespace: tenant.Status.Namespace,
 			Labels: map[string]string{
-				"app":                  "redis",
-				"neurallog.io/tenant": tenant.Name,
-				"neurallog.io/component": "redis",
+				"app":                     "redis",
+				"neurallog.io/tenant":     tenant.Name,
+				"neurallog.io/component":  "redis",
 				"neurallog.io/managed-by": "tenant-operator",
 			},
 		},
@@ -657,15 +663,15 @@ func (r *TenantReconciler) reconcileRedisService(ctx context.Context, tenant *ne
 			Name:      serviceName,
 			Namespace: tenant.Status.Namespace,
 			Labels: map[string]string{
-				"app":                  "redis",
-				"neurallog.io/tenant": tenant.Name,
-				"neurallog.io/component": "redis",
+				"app":                     "redis",
+				"neurallog.io/tenant":     tenant.Name,
+				"neurallog.io/component":  "redis",
 				"neurallog.io/managed-by": "tenant-operator",
 			},
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{
-				"app":                  "redis",
+				"app":                 "redis",
 				"neurallog.io/tenant": tenant.Name,
 			},
 			Ports: []corev1.ServicePort{
@@ -715,9 +721,9 @@ func (r *TenantReconciler) reconcileRedisStatefulSet(ctx context.Context, tenant
 
 	// Define labels
 	labels := map[string]string{
-		"app":                  "redis",
-		"neurallog.io/tenant": tenant.Name,
-		"neurallog.io/component": "redis",
+		"app":                     "redis",
+		"neurallog.io/tenant":     tenant.Name,
+		"neurallog.io/component":  "redis",
 		"neurallog.io/managed-by": "tenant-operator",
 	}
 
@@ -782,7 +788,7 @@ func (r *TenantReconciler) reconcileRedisStatefulSet(ctx context.Context, tenant
 			Replicas:    &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app":                  "redis",
+					"app":                 "redis",
 					"neurallog.io/tenant": tenant.Name,
 				},
 			},
@@ -992,15 +998,15 @@ func (r *TenantReconciler) reconcileServerService(ctx context.Context, tenant *n
 			Name:      serviceName,
 			Namespace: tenant.Status.Namespace,
 			Labels: map[string]string{
-				"app":                  "neurallog-server",
-				"neurallog.io/tenant": tenant.Name,
-				"neurallog.io/component": "server",
+				"app":                     "neurallog-server",
+				"neurallog.io/tenant":     tenant.Name,
+				"neurallog.io/component":  "server",
 				"neurallog.io/managed-by": "tenant-operator",
 			},
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{
-				"app":                  "neurallog-server",
+				"app":                 "neurallog-server",
 				"neurallog.io/tenant": tenant.Name,
 			},
 			Ports: []corev1.ServicePort{
@@ -1073,9 +1079,9 @@ func (r *TenantReconciler) reconcileServerDeployment(ctx context.Context, tenant
 
 	// Define labels
 	labels := map[string]string{
-		"app":                  "neurallog-server",
-		"neurallog.io/tenant": tenant.Name,
-		"neurallog.io/component": "server",
+		"app":                     "neurallog-server",
+		"neurallog.io/tenant":     tenant.Name,
+		"neurallog.io/component":  "server",
 		"neurallog.io/managed-by": "tenant-operator",
 	}
 
@@ -1203,7 +1209,7 @@ func (r *TenantReconciler) reconcileServerDeployment(ctx context.Context, tenant
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app":                  "neurallog-server",
+					"app":                 "neurallog-server",
 					"neurallog.io/tenant": tenant.Name,
 				},
 			},
